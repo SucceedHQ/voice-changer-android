@@ -149,7 +149,8 @@ class MainActivity : ComponentActivity() {
         Button(
             onClick = onClick,
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (selected) MaterialTheme.colorScheme.primary else Color(0xFF1A1A1C)
+                containerColor = if (selected) MaterialTheme.colorScheme.primary else Color(0xFF1A1A1C),
+                contentColor = Color.White // Force white text
             ),
             modifier = Modifier.height(48.dp)
         ) {
