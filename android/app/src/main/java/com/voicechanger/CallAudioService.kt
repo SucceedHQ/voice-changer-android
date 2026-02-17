@@ -1,7 +1,9 @@
 package com.voicechanger
 
 import android.app.*
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -9,7 +11,7 @@ import com.voicechanger.audio.AudioRouter
 
 class CallAudioService : Service() {
     
-    private val audioRouter = AudioRouter()
+    private lateinit var audioRouter: AudioRouter
     private var currentPersona = "neutral"
     
     companion object {
@@ -22,24 +24,37 @@ class CallAudioService : Service() {
     
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
-        Log.d("CallAudioService", "Service created")
+        try {
+            audioRouter = AudioRouter(this)
+            createNotificationChannel()
+            Log.d("CallAudioService", "Service created")
+        } catch (e: Exception) {
+            Log.e("CallAudioService", "Error in onCreate: ${e.message}")
+        }
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> {
-                currentPersona = intent.getStringExtra(EXTRA_PERSONA) ?: "neutral"
-                startForegroundService()
-                audioRouter.start(currentPersona)
+        try {
+            when (intent?.action) {
+                ACTION_START -> {
+                    currentPersona = intent.getStringExtra(EXTRA_PERSONA) ?: "neutral"
+                    startForegroundService()
+                    if (::audioRouter.isInitialized) {
+                        audioRouter.start(currentPersona)
+                    }
+                }
+                ACTION_STOP -> {
+                    stopForegroundService()
+                }
+                ACTION_SET_PERSONA -> {
+                    currentPersona = intent.getStringExtra(EXTRA_PERSONA) ?: "neutral"
+                    if (::audioRouter.isInitialized) {
+                        audioRouter.setPersona(currentPersona)
+                    }
+                }
             }
-            ACTION_STOP -> {
-                stopForegroundService()
-            }
-            ACTION_SET_PERSONA -> {
-                currentPersona = intent.getStringExtra(EXTRA_PERSONA) ?: "neutral"
-                audioRouter.setPersona(currentPersona)
-            }
+        } catch (e: Exception) {
+            Log.e("CallAudioService", "Error in onStartCommand: ${e.message}")
         }
         
         return START_STICKY
@@ -52,7 +67,9 @@ class CallAudioService : Service() {
     }
     
     private fun stopForegroundService() {
-        audioRouter.stop()
+        if (::audioRouter.isInitialized) {
+            audioRouter.stop()
+        }
         stopForeground(true)
         stopSelf()
         Log.d("CallAudioService", "Foreground service stopped")
@@ -66,31 +83,37 @@ class CallAudioService : Service() {
             this, 0, stopIntent, PendingIntent.FLAG_IMMUTABLE
         )
         
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Voice Changer Active")
-            .setContentText("Voice: $currentPersona")
+            .setContentText("Voice: $currentPersona (Speaker Mode)")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .addAction(android.R.drawable.ic_delete, "Stop", stopPendingIntent)
-            .build()
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            
+        return builder.build()
     }
     
     private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "Call Audio Service",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Runs voice changer during calls"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Call Audio Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Runs voice changer during calls"
+            }
+            
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
         }
-        
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
     }
     
     override fun onBind(intent: Intent?): IBinder? = null
     
     override fun onDestroy() {
-        audioRouter.stop()
+        if (::audioRouter.isInitialized) {
+            audioRouter.stop()
+        }
         super.onDestroy()
         Log.d("CallAudioService", "Service destroyed")
     }
