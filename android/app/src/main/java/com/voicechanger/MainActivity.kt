@@ -1,7 +1,9 @@
 package com.voicechanger
 
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
@@ -156,27 +158,45 @@ class MainActivity : ComponentActivity() {
     }
     
     private fun startService(persona: String) {
-        val intent = Intent(this, CallAudioService::class.java).apply {
-            action = CallAudioService.ACTION_START
-            putExtra(CallAudioService.EXTRA_PERSONA, persona)
+        try {
+            val intent = Intent(this, CallAudioService::class.java).apply {
+                action = CallAudioService.ACTION_START
+                putExtra(CallAudioService.EXTRA_PERSONA, persona)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            isServiceRunning = true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(this, "Error starting service: ${e.message}", Toast.LENGTH_LONG).show()
+            isServiceRunning = false
         }
-        startForegroundService(intent)
-        isServiceRunning = true
     }
     
     private fun stopService() {
-        val intent = Intent(this, CallAudioService::class.java).apply {
-            action = CallAudioService.ACTION_STOP
+        try {
+            val intent = Intent(this, CallAudioService::class.java).apply {
+                action = CallAudioService.ACTION_STOP
+            }
+            startService(intent)
+            isServiceRunning = false
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        startService(intent)
-        isServiceRunning = false
     }
     
     private fun updatePersona(persona: String) {
-        val intent = Intent(this, CallAudioService::class.java).apply {
-            action = CallAudioService.ACTION_SET_PERSONA
-            putExtra(CallAudioService.EXTRA_PERSONA, persona)
+        try {
+            val intent = Intent(this, CallAudioService::class.java).apply {
+                action = CallAudioService.ACTION_SET_PERSONA
+                putExtra(CallAudioService.EXTRA_PERSONA, persona)
+            }
+            startService(intent)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
-        startService(intent)
     }
 }

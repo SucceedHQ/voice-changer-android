@@ -1,8 +1,10 @@
 package com.voicechanger.audio
 
+import android.annotation.SuppressLint
 import android.media.*
 import android.util.Log
 import kotlinx.coroutines.*
+import kotlin.math.max
 
 /**
  * Routes audio from microphone through voice processor and back to call.
@@ -21,57 +23,80 @@ class AudioRouter {
     private var isRunning = false
     private var processingJob: Job? = null
     
-    private val bufferSize = AudioRecord.getMinBufferSize(
+    private val minBufferSize = AudioRecord.getMinBufferSize(
         sampleRate, channelConfig, audioFormat
-    ) * 2
+    )
+    private val bufferSize = max(minBufferSize, 4096)
     
+    @SuppressLint("MissingPermission")
     fun start(persona: String = "neutral") {
         if (isRunning) return
         
-        voiceProcessor.setPersona(persona)
-        
-        // Initialize AudioRecord (microphone input)
-        audioRecord = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-            sampleRate,
-            channelConfig,
-            audioFormat,
-            bufferSize
-        )
-        
-        // Initialize AudioTrack (output to call)
-        audioTrack = AudioTrack(
-            AudioManager.STREAM_VOICE_CALL,
-            sampleRate,
-            AudioFormat.CHANNEL_OUT_MONO,
-            audioFormat,
-            bufferSize,
-            AudioTrack.MODE_STREAM
-        )
-        
-        audioRecord?.startRecording()
-        audioTrack?.play()
-        
-        isRunning = true
-        
-        // Start processing loop
-        processingJob = CoroutineScope(Dispatchers.IO).launch {
-            processAudioLoop()
+        try {
+            voiceProcessor.setPersona(persona)
+            
+            // Initialize AudioRecord (microphone input)
+            audioRecord = AudioRecord(
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                sampleRate,
+                channelConfig,
+                audioFormat,
+                bufferSize
+            )
+            
+            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+                Log.e("AudioRouter", "AudioRecord initialization failed")
+                return
+            }
+            
+            // Initialize AudioTrack (output to call)
+            audioTrack = AudioTrack(
+                AudioManager.STREAM_VOICE_CALL,
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                audioFormat,
+                bufferSize,
+                AudioTrack.MODE_STREAM
+            )
+            
+            if (audioTrack?.state != AudioTrack.STATE_INITIALIZED) {
+                Log.e("AudioRouter", "AudioTrack initialization failed")
+                audioRecord?.release()
+                return
+            }
+            
+            audioRecord?.startRecording()
+            audioTrack?.play()
+            
+            isRunning = true
+            
+            // Start processing loop
+            processingJob = CoroutineScope(Dispatchers.IO).launch {
+                processAudioLoop()
+            }
+            
+            Log.d("AudioRouter", "Audio routing started with persona: $persona")
+        } catch (e: Exception) {
+            Log.e("AudioRouter", "Error starting audio routing: ${e.message}")
+            e.printStackTrace()
+            stop()
         }
-        
-        Log.d("AudioRouter", "Audio routing started with persona: $persona")
     }
     
     fun stop() {
         isRunning = false
         processingJob?.cancel()
         
-        audioRecord?.stop()
-        audioRecord?.release()
+        try {
+            audioRecord?.stop()
+            audioRecord?.release()
+        } catch (e: Exception) { e.printStackTrace() }
         audioRecord = null
         
-        audioTrack?.stop()
-        audioTrack?.release()
+        try {
+            audioTrack?.stop()
+            audioTrack?.release()
+        } catch (e: Exception) { e.printStackTrace() }
         audioTrack = null
         
         Log.d("AudioRouter", "Audio routing stopped")
@@ -84,20 +109,27 @@ class AudioRouter {
     
     private suspend fun processAudioLoop() {
         val buffer = ShortArray(bufferSize / 2)
+        val audioRecord = this.audioRecord ?: return
+        val audioTrack = this.audioTrack ?: return
         
         while (isRunning) {
-            // Read from microphone
-            val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
-            
-            if (read > 0) {
-                // Process audio (apply voice change)
-                val processed = voiceProcessor.processAudio(buffer.copyOf(read))
+            try {
+                // Read from microphone
+                val read = audioRecord.read(buffer, 0, buffer.size) 
                 
-                // Write to call output
-                audioTrack?.write(processed, 0, processed.size)
+                if (read > 0) {
+                    // Process audio (apply voice change)
+                    val processed = voiceProcessor.processAudio(buffer.copyOf(read))
+                    
+                    // Write to call output
+                    audioTrack.write(processed, 0, processed.size)
+                }
+                
+                yield() // Allow cancellation
+            } catch (e: Exception) {
+                Log.e("AudioRouter", "Error in audio loop: ${e.message}")
+                if (!isRunning) break
             }
-            
-            yield() // Allow cancellation
         }
     }
 }
