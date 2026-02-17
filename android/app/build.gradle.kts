@@ -21,10 +21,21 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            // fast fix: use debug keystore for release build to ensure it's signed
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("debug") // Use debug signing for now
         }
     }
     
