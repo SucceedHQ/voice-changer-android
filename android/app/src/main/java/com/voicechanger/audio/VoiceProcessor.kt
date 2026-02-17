@@ -25,16 +25,19 @@ class VoiceProcessor {
     fun setPersona(persona: String) {
         when (persona.lowercase()) {
             "male" -> {
-                pitchShift = 0.75f
-                formantShift = 0.85f
+                // Less deep (was 0.75), more natural
+                pitchShift = 0.85f 
+                formantShift = 0.90f
             }
             "female" -> {
-                pitchShift = 1.4f
-                formantShift = 1.15f
+                // Less high (was 1.4), avoid chipmunk effect
+                pitchShift = 1.15f 
+                formantShift = 1.10f
             }
             "child" -> {
-                pitchShift = 1.6f
-                formantShift = 1.25f
+                // Distinct from female
+                pitchShift = 1.5f 
+                formantShift = 1.2f
             }
             else -> {
                 pitchShift = 1.0f
