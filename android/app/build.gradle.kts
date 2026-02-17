@@ -62,17 +62,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     
-    // OkHttp for WebSocket
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
-
-    // Supabase
-    implementation("io.github.jan-tennert.supabase:postgrest-kt:2.1.3")
-    implementation("io.github.jan-tennert.supabase:storage-kt:2.1.3")
-    implementation("io.github.jan-tennert.supabase:gotrue-kt:2.1.3")
-    implementation("io.ktor:ktor-client-android:2.3.7")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")
