@@ -1,0 +1,18 @@
+fastapi
+uvicorn
+python-multipart
+websockets
+numpy
+scipy
+torch --index-url https://download.pytorch.org/whl/cu118
+torchaudio --index-url https://download.pytorch.org/whl/cu118
+librosa
+soundfile
+pydub
+faiss-gpu
+pyworld
+scipy
+torch --index-url https://download.pytorch.org/whl/cu118
+torchaudio --index-url https://download.pytorch.org/whl/cu118
+# onnxruntime-gpu # for ONNX fallback
+# tensorrt # functionality requires specific setup

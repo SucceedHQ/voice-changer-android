@@ -1,0 +1,110 @@
+:root {
+  --primary: #9d50bb;
+  --secondary: #6e48aa;
+  --bg: #0a0a0c;
+  --glass: rgba(255, 255, 255, 0.05);
+  --accent: #00f2fe;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg);
+  color: white;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-container {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2rem;
+  background: radial-gradient(circle at top, #1a1033, var(--bg));
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 2rem;
+  animation: fadeIn 0.6s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.glass-card {
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  border: none;
+  border-radius: 50px;
+  padding: 1rem 2rem;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  box-shadow: 0 10px 20px rgba(110, 72, 170, 0.3);
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 15px 30px rgba(110, 72, 170, 0.4);
+}
+
+.btn-primary:active {
+  transform: scale(0.95);
+}
+
+.record-trigger {
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.record-trigger:hover {
+  transform: scale(1.05);
+}
+
+.record-trigger:active {
+  transform: scale(0.95);
+}
+
+.waveform-container {
+  width: 100%;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.wave-bar {
+  width: 4px;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: height 0.1s ease;
+}
