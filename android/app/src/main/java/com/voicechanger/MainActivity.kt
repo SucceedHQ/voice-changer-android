@@ -139,6 +139,24 @@ class MainActivity : ComponentActivity() {
                         text = if (isActive) "Voice changer is active" else "Tap to activate",
                         color = if (isActive) Color(0xFF00F2FE) else Color.Gray
                     )
+                    
+                    Spacer(modifier = Modifier.height(24.dp))
+                    
+                    // Test Button
+                    Button(
+                        onClick = { 
+                            if (!isActive) {
+                                // Simple test: Start service briefly or use a separate test method
+                                // For now, just a toast instruction
+                                Toast.makeText(this@MainActivity.applicationContext, "Activate specific voice to test loopback", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(this@MainActivity.applicationContext, "Speak now! You should hear yourself.", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF333333))
+                    ) {
+                        Text("Test Output (Hear Yourself)", color = Color.White)
+                    }
                 }
             }
         }
