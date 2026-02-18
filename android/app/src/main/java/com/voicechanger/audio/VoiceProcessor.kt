@@ -131,114 +131,78 @@ class VoiceProcessor {
     }
     
     /**
-     * Simplified PSOLA implementation.
-     * 1. Detect Pitch Period (P)
-     * 2. Create Overlap-Add Windows based on P
-     * 3. Shift grains
+     * Pitch Shifting using Resampling + OLA (Time-Scale Modification).
+     * 1. Resample signal to shift pitch (duration changes inversely).
+     * 2. Use OLA to time-stretch back to original duration (preserving pitch).
      */
     private fun applyPSOLA(input: FloatArray, ratio: Float): FloatArray {
-        // Detect pitch period in samples
-        val period = detectPitchPeriod(input)
+        // 1. Resample: Changes Pitch by 'ratio', Duration by '1/ratio'
+        // If ratio > 1 (Pitch Up), we play faster (Duration Down).
+        // To get Pitch Up, we resample with step < 1.0? 
+        // No, to Pitch Shift UP (higher freq), we iterate input SLOWER? 
+        // Wait, if I play a tape fast (Pitch UP), I cover more input samples per seconds.
+        // If I have 1 sec of audio, and I play it in 0.5 sec, Pitch is 2x.
+        // My resampleLinear uses `newSize = size * factor`.
+        // If pitchShift = 2.0. We want a signal that sounds 2x higher.
+        // This effectively means playing it at 2x speed? 
+        // No, 2x speed means duration is 0.5x.
+        // resampling with factor=0.5 (decimation) makes it shorter?
         
-        // If no clear pitch (unvoiced), fall back to simple resampling or OLA
-        if (period == 0) {
-           return resampleLinear(input, ratio)
-        }
-
-        // Output size approx
-        val newSize = (input.size / ratio).toInt()
-        val output = FloatArray(newSize + period * 2) // Extra space for overlap
+        // Let's stick to standard def:
+        // We want Pitch * ratio.
+        // We create a resampled buffer where the waveform is compressed/stretched.
+        // Compressed waveform = Higher Pitch. 
+        // To compress waveform, we take input[0], input[2], input[4]... 
+        // This is decimation (factor < 1).
+        // But wait, if I take every 2nd sample, the array is smaller. 
+        // Audio engine plays it at fixed 44100.
+        // If array is half size, it plays in half time. Pitch is 2x. 
+        // Correct.
         
-        // Grain generation
-        var inputIdx = 0.0f
-        var outputIdx = 0
+        // So for Pitch Ratio X:
+        // We want new size = size / X.
+        // Resample factor = 1/X.
         
-        while (outputIdx < newSize && inputIdx < input.size - period) {
-            val iIdx = inputIdx.toInt()
-            
-            // Grain Window (Hanning)
-            val grainLen = period * 2
-            if (iIdx + grainLen >= input.size) break
-            
-            for (k in 0 until grainLen) {
-                val window = 0.5f * (1f - cos(2f * PI.toFloat() * k / (grainLen - 1)))
-                val sample = input[iIdx + k] * window
-                
-                if (outputIdx + k < output.size) {
-                    output[outputIdx + k] += sample
-                }
-            }
-            
-            // Advance
-            val analysisHop = period.toFloat() 
-            // val synthesisHop = period.toFloat() / ratio
-            
-            inputIdx += analysisHop // Move through input at natural pitch rate
-  
-            
-            // SIMPLIFIED APPROACH:
-            // 1. Resample whole signal by 'ratio' (changes Pitch AND Duration)
-            // 2. Use TSM (OLA) to restore original Duration.
-            
-            // Let's implement that approach as it's more robust for real-time.
-            break; // Switching strategy below
-        }
+        val resampleFactor = 1.0f / ratio
+        val resampled = resampleLinear(input, resampleFactor)
         
-        // Strategy Swap: Resample -> SOLA
-        // 1. Resample (Change pitch to target, duration changes inversely)
-        val resampled = resampleLinear(input, 1.0f / ratio) // If ratio=2.0 (higher), we consume input faster? No.
-        // If we want pitch x2, we play 2x faster. Duration is 0.5.
-        // We need to time-stretch 2x to get duration back to 1.0.
+        // 2. Now 'resampled' has correct Pitch, but wrong Duration (size / ratio).
+        // We need to restore Duration to match original 'input.size'.
+        // So we need to time-stretch by 'ratio'.
+        // e.g. if Pitch=2.0, resampled is 0.5 length. We stretch by 2.0 to get 1.0 length.
         
         return applySOLA(resampled, ratio)
     }
     
-    // Time-Stretch using SOLA (Synchronized Overlap-Add)
+    // Time-Stretch using OLA (Overlap-Add)
     private fun applySOLA(input: FloatArray, stretchFactor: Float): FloatArray {
-         // Target duration = input.size * stretchFactor
-         // Realtime: we process formatted blocks.
-         // This is complex for block-based. 
-         // Let's stick to a simpler Grain OLA for pitch shifting purely.
+         val outputTargetSize = (input.size * stretchFactor).toInt()
+         val output = FloatArray(outputTargetSize)
          
-         // New Strategy: WSOLA-like grain shifting
-         // For Pitch Shift 'alpha':
-         // Analysis Hop = Ha
-         // Synthesis Hop = Hs = Ha
-         // But we resample the grain?
-         
-         // FALLBACK to simple Granular Pitch Shifter for stability in this iteration:
-         // 1. Take grain of size G
-         // 2. Play it at speed 'ratio'
-         // 3. Overlap with next grain
-         
-         val output = FloatArray(input.size)
-         val grainSize = 512 // ~11ms
+         val grainSize = 512 
          val overlap = grainSize / 2
          
-         var outPtr = 0
-         var inPtr = 0.0f
+         val synthesisHop = overlap // Fixed output advance
+         val analysisHop = (synthesisHop / stretchFactor).toInt() // Input varies
          
-         while (outPtr + grainSize < output.size) {
-             val intInPtr = inPtr.toInt()
-             if (intInPtr + grainSize >= input.size) break
-             
-             // Cross-fade window
+         var outPtr = 0
+         var inPtr = 0
+         
+         // Hanning window
+         val window = FloatArray(grainSize) { i ->
+             0.5f * (1f - cos(2f * PI.toFloat() * i / (grainSize - 1)))
+         }
+         
+         while (outPtr + grainSize < output.size && inPtr + grainSize < input.size) {
+             // Add grain
              for (i in 0 until grainSize) {
-                 val window = 0.5f * (1f - cos(2f * PI.toFloat() * i / (grainSize - 1)))
-                 
-                 // Interpolate input at intInPtr + (i * ratio)
-                 // This effectively pitch-shifts the grain
-                 val grainPos = i * ratio
-                 val i0 = intInPtr + grainPos.toInt()
-                 if (i0 < input.size - 1) {
-                    val s = input[i0] + (input[i0+1]-input[i0]) * (grainPos - grainPos.toInt())
-                     output[outPtr + i] += (s * window)
-                 }
+                 output[outPtr + i] += input[inPtr + i] * window[i]
              }
              
-             outPtr += overlap
-             inPtr += overlap 
+             outPtr += synthesisHop
+             inPtr += analysisHop
          }
+         
          return output
     }
 
