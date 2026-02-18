@@ -149,18 +149,18 @@ class AudioRouter(private val context: Context) {
     }
     
     private suspend fun processAudioLoop() {
-        // Read small chunks for low latency
-        val chunkSize = 1024 
+        // Read larger chunks for SOLA (needs history)
+        val chunkSize = 4096 
         val buffer = ShortArray(chunkSize)
         val audioRecord = this.audioRecord ?: return
         val audioTrack = this.audioTrack ?: return
         
         val noiseGateThreshold = 0.005f // ~ -45dB
-        // Software gain
-        val gain = 2.0f // +6dB
+        // Gain (Software Amp)
+        val gain = 3.0f // +10dB
         
         // Reverb wet/dry
-        val revMix = 0.2f
+        val revMix = 0.15f
         
         while (isRunning) {
             try {

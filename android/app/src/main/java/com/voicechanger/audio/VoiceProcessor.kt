@@ -6,13 +6,12 @@ import kotlin.math.*
 
 /**
  * Real-time voice processor for VoIP calls (Non-Root).
- * Applies PSOLA-based pitch shifting, formant correction, and spectral effects.
+ * Uses SOLA (Synchronized Overlap-Add) for high-fidelity pitch shifting.
  */
 class VoiceProcessor {
     
     // DSP Parameters
-    private var pitchShift: Float = 1.0f
-    private var formantShift: Float = 1.0f
+    private var pitchRatio: Float = 1.0f
     
     // Effects
     private var lfoFreq: Float = 5.0f // Hz
@@ -25,12 +24,11 @@ class VoiceProcessor {
     // Filter Chain
     private val filters = ArrayList<BiQuadFilter>()
     
-    // Pitch Detection State (Simple Autocorrelation / AMDF)
-    private val minPeriod = sampleRate / 400 // Max 400Hz
-    private val maxPeriod = sampleRate / 60 // Min 60Hz
-    
-    // Internal Buffers for Overlap-Add
-    private var overflowBuffer = FloatArray(0)
+    // SOLA State
+    private val overlap = 120 // Search range
+    private val windowSize = 1024 // Grain size
+    // Buffer to hold tail of previous output for overlap
+    private var outputTail = FloatArray(windowSize + overlap * 2) 
     
     // Limiter State
     private var envelope = 0.0f
@@ -40,190 +38,223 @@ class VoiceProcessor {
         
         when (persona.lowercase()) {
             "male" -> {
-                // Deeper tone, removing robotic highs
-                pitchShift = 0.82f 
-                formantShift = 0.92f
-                lfoDepth = 0.005f // Subtle variation
+                // Natural Male: Slight drop, reduce robotic highs
+                pitchRatio = 0.85f 
+                lfoDepth = 0.003f
                 
-                // 1. Low Shelf Cut (Reduce mud)
-                filters.add(BiQuadFilter.lowShelf(200f, -3.0f, sampleRate))
-                // 2. Peaking Boost (Chest resonance)
-                filters.add(BiQuadFilter.peaking(250f, 2.0f, 1.0f, sampleRate))
-                // 3. Low Pass (Remove robotic artifacts)
-                filters.add(BiQuadFilter.lowPass(3800f, 0.707f, sampleRate))
+                // Gentle Low Shelf (Warmth)
+                filters.add(BiQuadFilter.lowShelf(150f, 2.0f, sampleRate))
+                // Cut extreme highs only
+                filters.add(BiQuadFilter.highShelf(6000f, -3.0f, sampleRate))
             }
             "female" -> {
-                // Higher pitch, distinct feminine timbre
-                pitchShift = 1.55f 
-                formantShift = 1.15f
-                lfoDepth = 0.01f // Slight vibrato
+                // Natural Female: Raise pitch, high shelf for air
+                pitchRatio = 1.45f
+                lfoDepth = 0.005f
                 
-                // 1. High Pass (Reduce proximity effect)
-                filters.add(BiQuadFilter.highPass(150f, 0.707f, sampleRate))
-                // 2. Nasality / Frontal placement
-                filters.add(BiQuadFilter.peaking(2200f, 3.0f, 1.5f, sampleRate))
-                // 3. Air / Breathiness
-                filters.add(BiQuadFilter.highShelf(6000f, 3.0f, sampleRate))
-            }
-            "child" -> {
-                pitchShift = 1.65f 
-                formantShift = 1.35f
-                lfoDepth = 0.0f
-                filters.add(BiQuadFilter.peaking(3000f, 4.0f, 2.0f, sampleRate))
+                // Cut Mud
+                filters.add(BiQuadFilter.highPass(100f, 0.7f, sampleRate))
+                // Air Boost
+                filters.add(BiQuadFilter.highShelf(4000f, 2.0f, sampleRate))
             }
             else -> {
                 // Neutral
-                pitchShift = 1.0f
-                formantShift = 1.0f
+                pitchRatio = 1.0f
                 lfoDepth = 0.0f
             }
         }
     }
     
     fun processAudio(inputShorts: ShortArray): ShortArray {
-        // Convert to Float for processing
+        // Convert to Float
         val input = FloatArray(inputShorts.size) { inputShorts[it] / 32768f }
         
-        // 1. Apply LFO to pitch
-        var currentPitch = pitchShift
+        // 1. Modulate Pitch with LFO
+        var currentRatio = pitchRatio
         if (lfoDepth > 0) {
             val lfoVal = sin(lfoPhase) * lfoDepth
-            currentPitch *= (1.0f + lfoVal)
+            currentRatio *= (1.0f + lfoVal)
             lfoPhase += (2f * PI.toFloat() * lfoFreq) / sampleRate * input.size
-            if (lfoPhase > 2 * PI) lfoPhase -= (2f * PI.toFloat())
+            if (lfoPhase > 2 * PI) lfoPhase -= 2f * PI.toFloat()
         }
 
-        // 2. PSOLA Pitch Shifting
-        val pitched = if (abs(currentPitch - 1.0f) > 0.01f) {
-             applyPSOLA(input, currentPitch)
+        // 2. High-Quality Pitch Shift (Resample + SOLA)
+        val processedFloat = if (abs(currentRatio - 1.0f) > 0.01f) {
+             processSOLA(input, currentRatio)
         } else {
             input
         }
         
-        // 3. Apply Filter Chain
-        var processed = pitched
+        // 3. Apply Filters
+        var filtered = processedFloat
         for (filter in filters) {
-            processed = filter.process(processed)
+            filtered = filter.process(filtered)
         }
         
-        // 4. Limiter (Soft Knee)
-        for (i in processed.indices) {
-            val absVal = abs(processed[i])
-            // Simple attack/release envelope
-            val attack = 0.1f // Fast attack
-            val release = 0.01f // Slower release
+        // 4. Limiter (Soft Knee) & Output
+        val output = ShortArray(filtered.size)
+        for (i in filtered.indices) {
+            var samp = filtered[i]
+            val absVal = abs(samp)
+            
+            // Envelope follower
             if (absVal > envelope) {
-                envelope = attack * absVal + (1 - attack) * envelope
+                envelope = 0.1f * absVal + 0.9f * envelope
             } else {
-                envelope = release * absVal + (1 - release) * envelope
+                envelope = 0.001f * absVal + 0.999f * envelope
             }
             
-            // Gain reduction if loudness exceeds threshold
-            if (envelope > 0.95f) {
-                processed[i] *= (0.95f / envelope)
+            // Soft Limiter
+            if (envelope > 0.8f) {
+                samp *= (0.8f / envelope)
             }
+            
+            output[i] = (samp.coerceIn(-1.0f, 1.0f) * 32767).toInt().toShort()
         }
         
-        // Convert back to Short
-        return ShortArray(processed.size) {
-            (processed[it].coerceIn(-1.0f, 1.0f) * 32767).toInt().toShort()
-        }
+        return output
     }
     
     /**
-     * Pitch Shifting using Resampling + OLA (Time-Scale Modification).
-     * 1. Resample signal to shift pitch (duration changes inversely).
-     * 2. Use OLA to time-stretch back to original duration (preserving pitch).
+     * Pitch Shift Strategy:
+     * 1. Resample input by 1/ratio. (Changes pitch to target, but duration is wrong).
+     * 2. Time-Stretch by ratio using SOLA. (Restores duration, preserves pitch).
      */
-    private fun applyPSOLA(input: FloatArray, ratio: Float): FloatArray {
-        // 1. Resample: Changes Pitch by 'ratio', Duration by '1/ratio'
-        // If ratio > 1 (Pitch Up), we play faster (Duration Down).
-        // To get Pitch Up, we resample with step < 1.0? 
-        // No, to Pitch Shift UP (higher freq), we iterate input SLOWER? 
-        // Wait, if I play a tape fast (Pitch UP), I cover more input samples per seconds.
-        // If I have 1 sec of audio, and I play it in 0.5 sec, Pitch is 2x.
-        // My resampleLinear uses `newSize = size * factor`.
-        // If pitchShift = 2.0. We want a signal that sounds 2x higher.
-        // This effectively means playing it at 2x speed? 
-        // No, 2x speed means duration is 0.5x.
-        // resampling with factor=0.5 (decimation) makes it shorter?
-        
-        // Let's stick to standard def:
-        // We want Pitch * ratio.
-        // We create a resampled buffer where the waveform is compressed/stretched.
-        // Compressed waveform = Higher Pitch. 
-        // To compress waveform, we take input[0], input[2], input[4]... 
-        // This is decimation (factor < 1).
-        // But wait, if I take every 2nd sample, the array is smaller. 
-        // Audio engine plays it at fixed 44100.
-        // If array is half size, it plays in half time. Pitch is 2x. 
-        // Correct.
-        
-        // So for Pitch Ratio X:
-        // We want new size = size / X.
-        // Resample factor = 1/X.
-        
+    private fun processSOLA(input: FloatArray, ratio: Float): FloatArray {
+        // 1. Resample
         val resampleFactor = 1.0f / ratio
         val resampled = resampleLinear(input, resampleFactor)
         
-        // 2. Now 'resampled' has correct Pitch, but wrong Duration (size / ratio).
-        // We need to restore Duration to match original 'input.size'.
-        // So we need to time-stretch by 'ratio'.
-        // e.g. if Pitch=2.0, resampled is 0.5 length. We stretch by 2.0 to get 1.0 length.
-        
+        // 2. Time Shift (SOLA)
+        // We want to stretch 'resampled' length by 'ratio'.
         return applySOLA(resampled, ratio)
     }
     
-    // Time-Stretch using OLA (Overlap-Add)
+    /**
+     * SOLA Time-Stretching
+     * Expends/Contracts 'input' to match original duration.
+     * Uses cross-correlation to align phases.
+     */
     private fun applySOLA(input: FloatArray, stretchFactor: Float): FloatArray {
-         val outputTargetSize = (input.size * stretchFactor).toInt()
-         val output = FloatArray(outputTargetSize)
-         
-         val grainSize = 512 
-         val overlap = grainSize / 2
-         
-         val synthesisHop = overlap // Fixed output advance
-         val analysisHop = (synthesisHop / stretchFactor).toInt() // Input varies
-         
-         var outPtr = 0
-         var inPtr = 0
-         
-         // Hanning window
-         val window = FloatArray(grainSize) { i ->
-             0.5f * (1f - cos(2f * PI.toFloat() * i / (grainSize - 1)))
-         }
-         
-         while (outPtr + grainSize < output.size && inPtr + grainSize < input.size) {
-             // Add grain
-             for (i in 0 until grainSize) {
-                 output[outPtr + i] += input[inPtr + i] * window[i]
-             }
-             
-             outPtr += synthesisHop
-             inPtr += analysisHop
-         }
-         
-         return output
-    }
-
-    private fun detectPitchPeriod(buffer: FloatArray): Int {
-        // AMDF (Average Magnitude Difference Function)
-        var bestPeriod = 0
-        var minDiff = Float.MAX_VALUE
+        // Output length should be roughly: input.size * stretchFactor
+        // But for real-time, we matched input.size in processAudio logic context?
+        // Wait, 'input' here is already resampled.
+        // Original size was N. Resampled size is N/ratio.
+        // We stretch by ratio. Output size is N.
         
-        for (p in minPeriod..maxPeriod) {
-            var diff = 0.0f
-            // Check limited samples for performance
-            val checkLen = min(buffer.size - p, 200) 
-            for (i in 0 until checkLen) {
-                diff += abs(buffer[i] - buffer[i + p])
-            }
-            if (diff < minDiff) {
-                minDiff = diff
-                bestPeriod = p
-            }
+        val targetSize = (input.size * stretchFactor).toInt()
+        val output = FloatArray(targetSize)
+        
+        // Hop sizes
+        val SynHop = (windowSize / 4) // Fixed synthesis hop
+        val AnaHop = (SynHop / stretchFactor).toInt() // Analysis hop in input
+        
+        // Re-use tail buffer
+        if (outputTail.size < windowSize) {
+           outputTail = FloatArray(windowSize)
         }
-        return bestPeriod
+        
+        var inPtr = 0
+        var outPtr = 0
+        
+        // We write to output buffer, but we must overlap with previous tail.
+        // Copy tail to start of output? No, standard OLA adds to buffer.
+        // For Block Processing:
+        // We have 'outputTail' from previous block. 
+        // We start generating frames.
+        
+        // Since this is stateless simple implementation for now, we reset tail if gap is large?
+        // No, we need state. But for simplicity in this rewrite, we keep 'outputTail' as class member.
+        
+        // Temp output buffer (large enough)
+        val tempOut = FloatArray(targetSize + windowSize)
+        // Copy tail
+        for (i in outputTail.indices) {
+            if (i < tempOut.size) tempOut[i] = outputTail[i]
+        }
+        
+        var currentOutEnd = outputTail.size // Where valid data ends
+        
+        while (inPtr + windowSize < input.size && outPtr < targetSize) {
+            // Analaysis frame
+            val frame = FloatArray(windowSize)
+            for (i in 0 until windowSize) {
+                frame[i] = input[inPtr + i]
+            }
+            
+            // Search for best overlap in tempOut around outPtr
+            // We want to add 'frame' at 'outPtr' but we can shift it by +/- overlap
+            // to align with existing data in tempOut.
+            val searchStart = max(0, outPtr - overlap)
+            val searchEnd = min(currentOutEnd, outPtr + overlap)
+            
+            var bestOffset = 0
+            var maxCorr = -1.0f
+            
+            // Cross-correlation search
+            // Optimized: only check where we have data
+            if (searchEnd > searchStart) {
+                for (offset in 0 until (searchEnd - searchStart)) {
+                    val checkPos = searchStart + offset
+                    var corr = 0.0f
+                    // Correlate overlap region
+                    val compareLen = min(windowSize, currentOutEnd - checkPos)
+                    for (k in 0 until compareLen step 4) { // step 4 optimization
+                         corr += frame[k] * tempOut[checkPos + k]
+                    }
+                    if (corr > maxCorr) {
+                        maxCorr = corr
+                        bestOffset = checkPos - outPtr // Delta from nominal
+                    }
+                }
+            }
+            
+            val actualPos = outPtr + bestOffset
+            
+            // OLA
+            for (i in 0 until windowSize) {
+                // Hanning Window
+                val win = 0.5f * (1f - cos(2f * PI.toFloat() * i / (windowSize - 1)))
+                if (actualPos + i < tempOut.size) {
+                    // Fade in new, Fade out old? 
+                    // Standard OLA: Out[i] += In[i] * Window
+                    // But we need to handle valid data.
+                    // Simplified: Just add. 
+                    tempOut[actualPos + i] += frame[i] * win 
+                    
+                    // Normalize?
+                    // SOLA implies we align and fade.
+                    // If we just add, we might gain volume.
+                    // Usually we divide by overlap factor. 
+                }
+            }
+            
+            // Advance
+            inPtr += AnaHop
+            outPtr += SynHop
+            currentOutEnd = max(currentOutEnd, actualPos + windowSize)
+        }
+        
+        // Save new tail
+        val consumed = targetSize
+        val remaining = max(0, currentOutEnd - consumed)
+        for (i in 0 until remaining) {
+             if (consumed + i < tempOut.size) {
+                 outputTail[i] = tempOut[consumed + i]
+             } else {
+                 outputTail[i] = 0f
+             }
+        }
+        // Zero rest of tail
+        for (i in remaining until outputTail.size) outputTail[i] = 0f
+        
+        // Result
+        for (i in 0 until targetSize) {
+             // Normalization attempt (approximate 0.5 overlap of hanning sums to 1)
+             output[i] = tempOut[i] * 0.5f 
+        }
+        
+        return output
     }
     
     private fun resampleLinear(input: FloatArray, factor: Float): FloatArray {
@@ -241,7 +272,7 @@ class VoiceProcessor {
         return output
     }
     
-    // --- Nested BiQuad Filter Class ---
+    // --- BiQuad Filter ---
     class BiQuadFilter(
         private var b0: Float, private var b1: Float, private var b2: Float,
         private var a1: Float, private var a2: Float
@@ -256,71 +287,42 @@ class VoiceProcessor {
             for (i in input.indices) {
                 val x = input[i]
                 val y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
-                
-                // Shift states
-                x2 = x1
-                x1 = x
-                y2 = y1
-                y1 = y
-                
+                x2 = x1; x1 = x; y2 = y1; y1 = y
                 output[i] = y
             }
             return output
         }
         
         companion object {
-            fun peaking(freq: Float, dbGain: Float, q: Float, sampleRate: Int): BiQuadFilter {
-                val a = 10f.pow(dbGain / 40f)
-                val w0 = 2f * PI.toFloat() * freq / sampleRate
-                val alpha = sin(w0) / (2f * q)
-                val a0 = 1f + alpha / a
-                return BiQuadFilter(
-                    (1f + alpha * a) / a0, (-2f * cos(w0)) / a0, (1f - alpha * a) / a0,
-                    (-2f * cos(w0)) / a0, (1f - alpha / a) / a0
-                )
-            }
-            
+            // Gentle Filters (Q=0.7)
             fun lowShelf(freq: Float, dbGain: Float, sampleRate: Int): BiQuadFilter {
                 val a = 10f.pow(dbGain / 40f)
                 val w0 = 2f * PI.toFloat() * freq / sampleRate
-                val alpha = sin(w0) / 2f * sqrt((a + 1 / a) * (1 / 0.707f - 1) + 2)
+                val alpha = sin(w0) / 2f * sqrt((a + 1/a)*(1/0.7f - 1) + 2)
                 val cosw = cos(w0)
-                val a0 = (a + 1) + (a - 1) * cosw + 2 * sqrt(a) * alpha
+                val a0 = (a+1) + (a-1)*cosw + 2*sqrt(a)*alpha
                  return BiQuadFilter(
-                    (a * ((a + 1) - (a - 1) * cosw + 2 * sqrt(a) * alpha)) / a0,
-                    (2 * a * ((a - 1) - (a + 1) * cosw)) / a0,
-                    (a * ((a + 1) - (a - 1) * cosw - 2 * sqrt(a) * alpha)) / a0,
-                    (-2 * ((a - 1) + (a + 1) * cosw)) / a0,
-                    ((a + 1) + (a - 1) * cosw - 2 * sqrt(a) * alpha) / a0
+                    (a*((a+1) - (a-1)*cosw + 2*sqrt(a)*alpha))/a0,
+                    (2*a*((a-1) - (a+1)*cosw))/a0,
+                    (a*((a+1) - (a-1)*cosw - 2*sqrt(a)*alpha))/a0,
+                    (-2*((a-1) + (a+1)*cosw))/a0,
+                    ((a+1) + (a-1)*cosw - 2*sqrt(a)*alpha)/a0
                 )
             }
-            
             fun highShelf(freq: Float, dbGain: Float, sampleRate: Int): BiQuadFilter {
                 val a = 10f.pow(dbGain / 40f)
                 val w0 = 2f * PI.toFloat() * freq / sampleRate
-                val alpha = sin(w0) / 2f * sqrt((a + 1 / a) * (1 / 0.707f - 1) + 2)
+                val alpha = sin(w0) / 2f * sqrt((a + 1/a)*(1/0.7f - 1) + 2)
                 val cosw = cos(w0)
-                val a0 = (a + 1) - (a - 1) * cosw + 2 * sqrt(a) * alpha
+                val a0 = (a+1) - (a-1)*cosw + 2*sqrt(a)*alpha
                 return BiQuadFilter(
-                    (a * ((a + 1) + (a - 1) * cosw + 2 * sqrt(a) * alpha)) / a0,
-                    (-2 * a * ((a - 1) + (a + 1) * cosw)) / a0,
-                    (a * ((a + 1) + (a - 1) * cosw - 2 * sqrt(a) * alpha)) / a0,
-                    (2 * ((a - 1) - (a + 1) * cosw)) / a0,
-                    ((a + 1) - (a - 1) * cosw - 2 * sqrt(a) * alpha) / a0
+                    (a*((a+1) + (a-1)*cosw + 2*sqrt(a)*alpha))/a0,
+                    (-2*a*((a-1) + (a+1)*cosw))/a0,
+                    (a*((a+1) + (a-1)*cosw - 2*sqrt(a)*alpha))/a0,
+                    (2*((a-1) - (a+1)*cosw))/a0,
+                    ((a+1) - (a-1)*cosw - 2*sqrt(a)*alpha)/a0
                 )
             }
-            
-            fun lowPass(freq: Float, q: Float, sampleRate: Int): BiQuadFilter {
-                 val w0 = 2f * PI.toFloat() * freq / sampleRate
-                 val alpha = sin(w0) / (2f * q)
-                 val cosw = cos(w0)
-                 val a0 = 1f + alpha
-                 return BiQuadFilter(
-                     ((1f - cosw) / 2f) / a0, ((1f - cosw)) / a0, ((1f - cosw) / 2f) / a0,
-                     (-2f * cosw) / a0, (1f - alpha) / a0
-                 )
-            }
-
             fun highPass(freq: Float, q: Float, sampleRate: Int): BiQuadFilter {
                 val w0 = 2f * PI.toFloat() * freq / sampleRate
                 val alpha = sin(w0) / (2f * q)
