@@ -157,7 +157,7 @@ class AudioRouter(private val context: Context) {
         
         val noiseGateThreshold = 0.002f // Lowered to catch "yea", "ok"
         // Gain (Software Amp)
-        val gain = 3.0f // +10dB
+        val gain = 1.5f // Reduced from 3.0f to prevent clipping
         
         // Reverb wet/dry
         val revMix = 0.15f

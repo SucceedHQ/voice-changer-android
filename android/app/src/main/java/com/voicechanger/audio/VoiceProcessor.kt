@@ -38,29 +38,28 @@ class VoiceProcessor {
         
         when (persona.lowercase()) {
             "male" -> {
-                // Natural Male: Slight drop, but not too deep. 
-                // Increased from 0.85 to 0.88 to reduce "robotic" depth.
-                pitchRatio = 0.88f 
-                lfoDepth = 0.002f // Reduced LFO for more stability
+                // Natural Male: Deeper (0.82)
+                pitchRatio = 0.82f 
+                lfoDepth = 0.002f
                 
-                // Warmth & Clarity
-                filters.add(BiQuadFilter.lowShelf(150f, 1.5f, sampleRate))
-                // Clarity boost to make it sound less muffled/robotic
+                // Cut Mud/Thickness instead of boosting warmth
+                filters.add(BiQuadFilter.lowShelf(200f, -2.0f, sampleRate))
+                // Clarity boost 
                 filters.add(BiQuadFilter.peaking(3000f, 2.0f, 1.0f, sampleRate))
                 // Cut extreme highs
                 filters.add(BiQuadFilter.highShelf(7000f, -4.0f, sampleRate))
             }
             "female" -> {
-                // Natural Female: Lowered from 1.45 to 1.38 to sound more mature, less childish.
-                pitchRatio = 1.38f
+                // Natural Female: Compromise pitch (1.40)
+                pitchRatio = 1.40f
                 lfoDepth = 0.004f
                 
-                // Cut Mud & Add "Chest" Resonance
+                // Cut Mud
                 filters.add(BiQuadFilter.highPass(150f, 0.7f, sampleRate))
-                filters.add(BiQuadFilter.peaking(350f, 1.5f, 1.2f, sampleRate)) // Maturity boost
+                // Removed chest boost (peaking 350Hz) to prevent cracking/clipping
                 
-                // Air & Clarity (not too much to avoid sibilance)
-                filters.add(BiQuadFilter.highShelf(4000f, 1.5f, sampleRate))
+                // Air (Reduced gain)
+                filters.add(BiQuadFilter.highShelf(4000f, 1.0f, sampleRate))
             }
             else -> {
                 // Neutral
@@ -254,14 +253,9 @@ class VoiceProcessor {
         for (i in remaining until outputTail.size) outputTail[i] = 0f
         
         // Result
-        // Better normalization: Hanning window sums to 0.5 when overlapped by 50%.
-        // Since our SynHop is windowSize/4, we have ~4x overlap.
-        // Sum of Hann window with 75% overlap is 2.0. So we divide by 2.0 (multiply by 0.5f).
-        // However, SOLA alignment varies. We use a slightly safer factor.
-        val normFactor = 1.0f / (windowSize.toFloat() / SynHop.toFloat() * 0.5f) 
-        
+        // Reverted to simple static normalization to avoid volume spikes/cracking
         for (i in 0 until targetSize) {
-             output[i] = tempOut[i] * normFactor
+             output[i] = tempOut[i] * 0.5f
         }
         
         return output
