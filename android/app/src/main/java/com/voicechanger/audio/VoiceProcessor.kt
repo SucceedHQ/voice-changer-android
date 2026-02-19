@@ -41,53 +41,57 @@ class VoiceProcessor {
         
         when (persona.lowercase()) {
             // --- MALE VARIATIONS ---
-            "mv1", "male" -> { // Natural Baritone
-                pitchRatio = 0.92f 
+            "mv1", "male" -> { // Natural Baritone (Clear, Standard American)
+                pitchRatio = 0.90f 
                 filters.add(BiQuadFilter.lowShelf(200f, -2.0f, sampleRate)) // Cut mud
-                filters.add(BiQuadFilter.peaking(2500f, 2.0f, 1.0f, sampleRate)) // Clarity
-                filters.add(BiQuadFilter.highShelf(7000f, -3.0f, sampleRate))
+                filters.add(BiQuadFilter.peaking(2800f, 2.0f, 1.0f, sampleRate)) // Clarity
+                filters.add(BiQuadFilter.highShelf(7500f, -4.0f, sampleRate))
             }
-            "mv2" -> { // Deep but Clean
-                pitchRatio = 0.86f 
-                filters.add(BiQuadFilter.lowShelf(150f, -3.0f, sampleRate))
-                filters.add(BiQuadFilter.peaking(2000f, 1.5f, 0.8f, sampleRate)) // Body clarity
-                filters.add(BiQuadFilter.highShelf(6000f, -4.0f, sampleRate))
+            "mv2" -> { // Deep & Resonant (Less robotic, more "body")
+                pitchRatio = 0.84f 
+                filters.add(BiQuadFilter.lowShelf(150f, -1.0f, sampleRate))
+                filters.add(BiQuadFilter.peaking(250f, 1.5f, 0.7f, sampleRate)) // Chest resonance
+                filters.add(BiQuadFilter.peaking(2200f, 1.0f, 0.8f, sampleRate)) 
             }
-            "mv3" -> { // Casual / Friendly
-                pitchRatio = 0.95f
-                filters.add(BiQuadFilter.peaking(3000f, 2.0f, 1.2f, sampleRate)) // Smile EQ
-                filters.add(BiQuadFilter.lowShelf(100f, -1.0f, sampleRate))
+            "mv3" -> { // Warm / Friendly (Average American Male)
+                pitchRatio = 0.94f
+                filters.add(BiQuadFilter.peaking(3200f, 1.5f, 1.0f, sampleRate)) 
+                filters.add(BiQuadFilter.lowShelf(120f, -2.0f, sampleRate))
+                filters.add(BiQuadFilter.peaking(500f, -1.5f, 1.0f, sampleRate)) // Remove boxiness
             }
-            "mv4" -> { // Authoritative
-                pitchRatio = 0.89f
-                filters.add(BiQuadFilter.peaking(1000f, 2.0f, 1.0f, sampleRate)) // Chest presence
-                filters.add(BiQuadFilter.highShelf(5000f, -2.0f, sampleRate))
+            "mv4" -> { // Crisp / Professional
+                pitchRatio = 0.88f
+                filters.add(BiQuadFilter.peaking(3500f, 2.5f, 1.5f, sampleRate)) // High clarity
+                filters.add(BiQuadFilter.highPass(80f, 0.7f, sampleRate))
+                filters.add(BiQuadFilter.highShelf(6000f, -3.0f, sampleRate))
             }
 
             // --- FEMALE VARIATIONS ---
-            "fv1", "female" -> { // Natural High
-                pitchRatio = 1.35f
-                filters.add(BiQuadFilter.highPass(150f, 0.7f, sampleRate))
-                filters.add(BiQuadFilter.peaking(3000f, 2.0f, 1.0f, sampleRate)) // Definition
-                filters.add(BiQuadFilter.highShelf(5000f, 1.0f, sampleRate))
-            }
-            "fv2" -> { // Mature / Adult
-                pitchRatio = 1.22f
-                filters.add(BiQuadFilter.highPass(140f, 0.7f, sampleRate))
-                filters.add(BiQuadFilter.peaking(250f, 1.5f, 1.2f, sampleRate)) // Resonance
-                filters.add(BiQuadFilter.lowShelf(400f, -2.0f, sampleRate)) // De-mud
-            }
-            "fv3" -> { // Smooth / Radio
-                pitchRatio = 1.18f
+            // Aims: Avoid "Tegwolo" cartoon sound. Focus on lower pitch + warmth.
+            "fv1", "female" -> { // Natural American Female (Mature)
+                pitchRatio = 1.15f // Lowered from 1.35
                 filters.add(BiQuadFilter.highPass(120f, 0.7f, sampleRate))
-                filters.add(BiQuadFilter.highShelf(4000f, 3.0f, sampleRate)) // Air
-                filters.add(BiQuadFilter.peaking(1500f, -2.0f, 1.0f, sampleRate)) // Soften nasal
+                filters.add(BiQuadFilter.peaking(250f, 2.0f, 1.0f, sampleRate)) // Add body/warmth
+                filters.add(BiQuadFilter.peaking(1500f, -2.0f, 1.0f, sampleRate)) // Remove "honk"
+                filters.add(BiQuadFilter.highShelf(4500f, 1.5f, sampleRate)) // Gentle air
             }
-            "fv4" -> { // Young Adult
-                pitchRatio = 1.42f
+            "fv2" -> { // Softer / Breathy
+                pitchRatio = 1.12f
+                filters.add(BiQuadFilter.highPass(150f, 0.7f, sampleRate))
+                filters.add(BiQuadFilter.highShelf(3500f, 3.0f, sampleRate)) // Air boost
+                filters.add(BiQuadFilter.peaking(400f, -2.0f, 1.0f, sampleRate)) // Lighten
+            }
+            "fv3" -> { // High / Energetic (But not chipmunk)
+                pitchRatio = 1.25f // Max natural shift
                 filters.add(BiQuadFilter.highPass(180f, 0.7f, sampleRate))
-                filters.add(BiQuadFilter.peaking(1200f, 2.0f, 1.0f, sampleRate)) // Presence
-                filters.add(BiQuadFilter.highShelf(8000f, -2.0f, sampleRate)) // Avoid sibilance
+                filters.add(BiQuadFilter.peaking(300f, 2.5f, 1.2f, sampleRate)) // Significant body boost
+                filters.add(BiQuadFilter.peaking(1200f, -3.0f, 1.0f, sampleRate)) // De-nasal
+            }
+            "fv4" -> { // Smooth Radio Voice
+                pitchRatio = 1.20f
+                filters.add(BiQuadFilter.highPass(100f, 0.7f, sampleRate))
+                filters.add(BiQuadFilter.peaking(2200f, 2.0f, 1.5f, sampleRate)) // Definition
+                filters.add(BiQuadFilter.peaking(4000f, -2.0f, 1.0f, sampleRate)) // Sibilance control
             }
 
             else -> {

@@ -81,26 +81,45 @@ class MainActivity : ComponentActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Select Voice",
+                        text = "Select Voice Profile",
                         fontSize = 18.sp,
                         color = Color.White,
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
                     
+                    Text(text = "Male Variations", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(bottom = 12.dp)
                     ) {
-                        PersonaButton("Male", selectedPersona == "Male") {
-                            selectedPersona = "Male"
-                            if (isActive) updatePersona("Male")
+                        listOf("MV1", "MV2", "MV3", "MV4").forEach { p ->
+                            PersonaSmallButton(p, selectedPersona.equals(p, ignoreCase = true)) {
+                                selectedPersona = p
+                                if (isActive) updatePersona(p)
+                            }
                         }
+                    }
+
+                    Text(text = "Female Variations", color = Color.Gray, fontSize = 12.sp, modifier = Modifier.padding(bottom = 8.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    ) {
+                        listOf("FV1", "FV2", "FV3", "FV4").forEach { p ->
+                            PersonaSmallButton(p, selectedPersona.equals(p, ignoreCase = true)) {
+                                selectedPersona = p
+                                if (isActive) updatePersona(p)
+                            }
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
                         PersonaButton("Neutral", selectedPersona == "Neutral") {
                             selectedPersona = "Neutral"
                             if (isActive) updatePersona("Neutral")
-                        }
-                        PersonaButton("Female", selectedPersona == "Female") {
-                            selectedPersona = "Female"
-                            if (isActive) updatePersona("Female")
                         }
                     }
                 }
@@ -162,6 +181,22 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    @Composable
+    fun PersonaSmallButton(text: String, selected: Boolean, onClick: () -> Unit) {
+        Button(
+            onClick = onClick,
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (selected) MaterialTheme.colorScheme.primary else Color(0xFF1A1A1C),
+                contentColor = Color.White
+            ),
+            modifier = Modifier.height(36.dp),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+        ) {
+            Text(text, fontSize = 12.sp)
+        }
+    }
+
     @Composable
     fun PersonaButton(text: String, selected: Boolean, onClick: () -> Unit) {
         Button(
