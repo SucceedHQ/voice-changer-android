@@ -36,7 +36,7 @@ class AudioRouter(private val context: Context) {
     // Noise Gate State
     private var gateOpen = false
     private var gateTimer = 0
-    private val HOLD_TIME_FRAMES = 10 // ~100ms at 10ms chunks
+    private val HOLD_TIME_FRAMES = 25 // ~250ms at 10ms chunks (increased for short words)
     
     // Reverb State (Simple Feedback Delay Network)
     // 4 delay lines for a basic reverb
@@ -149,13 +149,13 @@ class AudioRouter(private val context: Context) {
     }
     
     private suspend fun processAudioLoop() {
-        // Read larger chunks for SOLA (needs history)
-        val chunkSize = 4096 
+        // Reduced chunk size for better responsiveness for short words
+        val chunkSize = 2048 
         val buffer = ShortArray(chunkSize)
         val audioRecord = this.audioRecord ?: return
         val audioTrack = this.audioTrack ?: return
         
-        val noiseGateThreshold = 0.005f // ~ -45dB
+        val noiseGateThreshold = 0.002f // Lowered to catch "yea", "ok"
         // Gain (Software Amp)
         val gain = 3.0f // +10dB
         
