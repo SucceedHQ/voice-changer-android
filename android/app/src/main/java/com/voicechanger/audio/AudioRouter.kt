@@ -149,15 +149,15 @@ class AudioRouter(private val context: Context) {
     }
     
     private suspend fun processAudioLoop() {
-        // Reduced chunk size for better responsiveness for short words
-        val chunkSize = 2048 
+        // Increased chunk size to 4096 (allowed 500ms latency) for smoother transitions
+        val chunkSize = 4096 
         val buffer = ShortArray(chunkSize)
         val audioRecord = this.audioRecord ?: return
         val audioTrack = this.audioTrack ?: return
         
         val noiseGateThreshold = 0.002f // Lowered to catch "yea", "ok"
         // Gain (Software Amp)
-        val gain = 1.5f // Reduced from 3.0f to prevent clipping
+        val gain = 1.2f // Conservative gain to ensure zero cracking
         
         // Reverb wet/dry
         val revMix = 0.15f
