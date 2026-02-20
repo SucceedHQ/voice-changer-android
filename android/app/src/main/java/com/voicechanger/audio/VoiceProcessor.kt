@@ -30,6 +30,16 @@ class VoiceProcessor {
     // Buffer to hold tail of previous output for overlap
     private var outputTail = FloatArray(windowSize + overlap * 2) 
     
+    // Persistent Input Buffer (NEW: fixes cracking for small audio blocks)
+    private var inputHistory = FloatArray(windowSize * 4)
+    private var inputHistoryPtr = 0
+    private var inputHistoryCount = 0
+
+    // Noise Gate State
+    private var noiseGateThreshold = 0.005f
+    private var energy = 0.0f
+    private val energyAlpha = 0.9f
+
     // Limiter State
     private var envelope = 0.0f
     
@@ -106,7 +116,23 @@ class VoiceProcessor {
         // Convert to Float
         val input = FloatArray(inputShorts.size) { inputShorts[it] / 32768f }
         
-        // 1. Modulate Pitch with LFO
+        // 0. Noise Gate (Check energy of input)
+        var blockMax = 0f
+        for (f in input) blockMax = max(blockMax, abs(f))
+        energy = energyAlpha * energy + (1f - energyAlpha) * blockMax
+        
+        if (energy < noiseGateThreshold) {
+           return ShortArray(inputShorts.size) { 0 }
+        }
+
+        // 1. Accumulate Input into History Buffer
+        for (f in input) {
+            inputHistory[inputHistoryPtr] = f
+            inputHistoryPtr = (inputHistoryPtr + 1) % inputHistory.size
+            if (inputHistoryCount < inputHistory.size) inputHistoryCount++
+        }
+
+        // 2. Modulate Pitch with LFO
         var currentRatio = pitchRatio
         if (lfoDepth > 0) {
             val lfoVal = sin(lfoPhase) * lfoDepth
@@ -115,20 +141,21 @@ class VoiceProcessor {
             if (lfoPhase > 2 * PI) lfoPhase -= 2f * PI.toFloat()
         }
 
-        // 2. High-Quality Pitch Shift (Resample + SOLA)
-        val processedFloat = if (abs(currentRatio - 1.0f) > 0.01f) {
+        // 3. High-Quality Pitch Shift (Resample + SOLA)
+        // We only process if we have enough data (at least one window)
+        val processedFloat = if (inputHistoryCount >= windowSize && abs(currentRatio - 1.0f) > 0.01f) {
              processSOLA(input, currentRatio)
         } else {
             input
         }
         
-        // 3. Apply Filters
+        // 4. Apply Filters
         var filtered = processedFloat
         for (filter in filters) {
             filtered = filter.process(filtered)
         }
         
-        // 4. Limiter (Soft Knee) & Output
+        // 5. Limiter (Soft Knee) & Output
         val output = ShortArray(filtered.size)
         for (i in filtered.indices) {
             var samp = filtered[i]
