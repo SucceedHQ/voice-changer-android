@@ -19,10 +19,16 @@ class VoiceProcessor extends AudioWorkletProcessor {
         this.inputPtr = 0;
         this.bufferReady = false;
 
-        // Noise Gate
-        this.gateThreshold = 0.01;
+        // Noise Gate with Hysteresis
+        this.gateThresholdLow = 0.015;
+        this.gateThresholdHigh = 0.035;
         this.gateAlpha = 0.95;
         this.currentLevel = 0;
+        this.isGateOpen = false;
+
+        // Filter State (4th order cascaded LPF approximation)
+        this.filterState = [0, 0, 0, 0];
+        this.lpAlpha = 0.6; // ~6-8kHz cutoff at 44.1kHz
 
         this.port.onmessage = (event) => {
             const { type, value } = event.data;
@@ -41,34 +47,25 @@ class VoiceProcessor extends AudioWorkletProcessor {
         if (!inputChannel) return true;
 
         // 1. Noise Gate & Level Tracking
-        let blockLevel = 0;
+        let blockMax = 0;
         for (let i = 0; i < inputChannel.length; i++) {
-            blockLevel = Math.max(blockLevel, Math.abs(inputChannel[i]));
+            blockMax = Math.max(blockMax, Math.abs(inputChannel[i]));
         }
-        this.currentLevel = this.gateAlpha * this.currentLevel + (1 - this.gateAlpha) * blockLevel;
+        this.currentLevel = this.gateAlpha * this.currentLevel + (1 - this.gateAlpha) * blockMax;
 
-        const isGated = this.currentLevel < this.gateThreshold;
-
-        // 2. Buffer Input
-        for (let i = 0; i < inputChannel.length; i++) {
-            this.inputBuffer[this.inputPtr] = inputChannel[i];
-            this.inputPtr = (this.inputPtr + 1) % this.inputBuffer.length;
+        // Hysteresis logic
+        if (!this.isGateOpen && this.currentLevel > this.gateThresholdHigh) {
+            this.isGateOpen = true;
+        } else if (this.isGateOpen && this.currentLevel < this.gateThresholdLow) {
+            this.isGateOpen = false;
         }
 
-        // 3. Simple Pitch Shifting / SOLA logic for Worklet
-        // Note: For real-time, we maintain a balance. 
-        // If we have enough input, we generate a block.
-        const anaHop = Math.floor(this.synHop / this.pitchFactor);
+        const isGated = !this.isGateOpen;
 
+        // 2. Buffer Input & Process
         for (let i = 0; i < outputChannel.length; i++) {
             if (isGated) {
                 outputChannel[i] = 0;
-                continue;
-            }
-
-            // Fallback to high-quality resampling if pitch is close to 1
-            if (Math.abs(this.pitchFactor - 1.0) < 0.05) {
-                outputChannel[i] = inputChannel[i];
                 continue;
             }
 
@@ -78,16 +75,19 @@ class VoiceProcessor extends AudioWorkletProcessor {
             const i1 = Math.min(i0 + 1, inputChannel.length - 1);
             const weight = srcIndex - i0;
 
+            let sample = 0;
             if (i0 < inputChannel.length) {
-                outputChannel[i] = inputChannel[i0] * (1 - weight) + inputChannel[i1] * weight;
-            } else {
-                outputChannel[i] = 0;
+                sample = inputChannel[i0] * (1 - weight) + inputChannel[i1] * weight;
             }
 
-            // Apply slight low-pass to reduce "hiss"
-            if (i > 0) {
-                outputChannel[i] = 0.8 * outputChannel[i] + 0.2 * outputChannel[i - 1];
-            }
+            // 3. Aggressive Multi-pole Low Pass (Cascaded One-Pole)
+            // This kills the "SHUUUU" high frequency hiss
+            this.filterState[0] = this.lpAlpha * sample + (1 - this.lpAlpha) * this.filterState[0];
+            this.filterState[1] = this.lpAlpha * this.filterState[0] + (1 - this.lpAlpha) * this.filterState[1];
+            this.filterState[2] = this.lpAlpha * this.filterState[1] + (1 - this.lpAlpha) * this.filterState[2];
+            this.filterState[3] = this.lpAlpha * this.filterState[2] + (1 - this.lpAlpha) * this.filterState[3];
+
+            outputChannel[i] = this.filterState[3];
         }
 
         return true;

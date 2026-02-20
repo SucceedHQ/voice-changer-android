@@ -36,9 +36,13 @@ class VoiceProcessor {
     private var inputHistoryCount = 0
 
     // Noise Gate State
-    private var noiseGateThreshold = 0.005f
     private var energy = 0.0f
-    private val energyAlpha = 0.9f
+    private val energyAlpha = 0.95f
+    private var isGateOpen = false
+    private val gateThresholdHigh = 0.03f
+    private val gateThresholdLow = 0.015f
+    private var gateHoldFrames = 0
+    private val maxHoldFrames = 15 // Hold open for ~300ms if 20ms blocks
 
     // Limiter State
     private var envelope = 0.0f
@@ -107,21 +111,34 @@ class VoiceProcessor {
             else -> {
                 // Neutral
                 pitchRatio = 1.0f
-                lfoDepth = 0.0f
             }
         }
+        
+        // GLOBAL NOISE REDUCTION: Aggressive Low Pass at 6kHz
+        filters.add(BiQuadFilter.lowPass(6000f, 0.7f, sampleRate))
     }
     
     fun processAudio(inputShorts: ShortArray): ShortArray {
         // Convert to Float
         val input = FloatArray(inputShorts.size) { inputShorts[it] / 32768f }
         
-        // 0. Noise Gate (Check energy of input)
+        // 0. Noise Gate with Hysteresis and Hold Timer
         var blockMax = 0f
         for (f in input) blockMax = max(blockMax, abs(f))
         energy = energyAlpha * energy + (1f - energyAlpha) * blockMax
         
-        if (energy < noiseGateThreshold) {
+        if (energy > gateThresholdHigh) {
+            isGateOpen = true
+            gateHoldFrames = maxHoldFrames
+        } else if (energy < gateThresholdLow) {
+            if (gateHoldFrames > 0) {
+                gateHoldFrames--
+            } else {
+                isGateOpen = false
+            }
+        }
+
+        if (!isGateOpen) {
            return ShortArray(inputShorts.size) { 0 }
         }
 
@@ -385,6 +402,19 @@ class VoiceProcessor {
                     (a*((a+1) + (a-1)*cosw - 2*sqrt(a)*alpha))/a0,
                     (2*((a-1) - (a+1)*cosw))/a0,
                     ((a+1) - (a-1)*cosw - 2*sqrt(a)*alpha)/a0
+                )
+            }
+            fun lowPass(freq: Float, q: Float, sampleRate: Int): BiQuadFilter {
+                val w0 = 2f * PI.toFloat() * freq / sampleRate
+                val alpha = sin(w0) / (2f * q)
+                val cosw = cos(w0)
+                val a0 = 1f + alpha
+                return BiQuadFilter(
+                    ((1f - cosw) / 2f) / a0,
+                    (1f - cosw) / a0,
+                    ((1f - cosw) / 2f) / a0,
+                    (-2f * cosw) / a0,
+                    (1f - alpha) / a0
                 )
             }
             fun highPass(freq: Float, q: Float, sampleRate: Int): BiQuadFilter {
